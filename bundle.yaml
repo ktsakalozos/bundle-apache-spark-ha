@@ -1,0 +1,17 @@
+series: trusty
+services:
+  zookeeper:
+    charm: "cs:trusty/apache-zookeeper-1"
+    num_units: 3
+    annotations:
+      "gui-x": "1374"
+      "gui-y": "569"
+  spark:
+    charm: "cs:trusty/apache-spark-8"
+    num_units: 3
+    annotations:
+      "gui-x": "1086"
+      "gui-y": "569"
+relations:
+  - - "zookeeper:zookeeper"
+    - "spark:zookeeper"
