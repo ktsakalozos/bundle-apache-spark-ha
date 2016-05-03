@@ -1,0 +1,77 @@
+#!/usr/bin/python3
+
+import amulet
+import time
+import yaml
+import unittest
+import os
+from charmhelpers.core import hookenv
+
+class TestDeployment(unittest.TestCase):
+    bundle_file = os.path.join(os.path.dirname(__file__), '..', 'bundle.yaml')
+
+    def setUp(self):
+        self.d = amulet.Deployment(series='trusty')
+        with open(self.bundle_file) as f:
+            bun = f.read()
+        bundle = yaml.safe_load(bun)
+        self.d.load(bundle)
+        self.d.setup(timeout=1800)
+        self.d.sentry.wait(timeout=1800)
+
+    def test_master_selected(self):
+        '''
+        Wait for all three spark units to agree on a master leader.
+        '''
+        self.d.sentry.wait_for_messages({"spark": ["Ready (standalone HA)",
+                                                   "Ready (standalone HA)",
+                                                   "Ready (standalone HA)"]}, timeout=900)
+
+        self.d.configure('spark', {
+            'maintenance_mode': 'true'})
+
+        self.d.sentry.wait_for_messages({"spark": ["Preparing for an upgrade",
+                                                   "Preparing for an upgrade",
+                                                   "Preparing for an upgrade"]}, timeout=900)
+
+        self.d.configure('spark', {
+            'spark_version': '1.6.1-hadoop2.6.0'})
+        self.d.sentry.wait_for_messages({"spark": ["Upgrade complete. You can exit maintenance mode",
+                                                   "Upgrade complete. You can exit maintenance mode",
+                                                   "Upgrade complete. You can exit maintenance mode"]}, timeout=900)
+
+        self.d.configure('spark', {
+            'maintenance_mode': 'false'})
+        self.d.sentry.wait_for_messages({"spark": ["Ready (standalone HA)",
+                                                   "Ready (standalone HA)",
+                                                   "Ready (standalone HA)"]}, timeout=900)
+
+        for sparkunit in self.d.sentry['spark']:
+            if not sparkunit:
+                continue
+
+            hostname, result = sparkunit.ssh('hostname')
+
+            # Check we are linked to the correct spark version
+            stdout, result = sparkunit.ssh('ls -ld /usr/lib/spark')
+            assert "/usr/lib/spark -> /usr/lib/spark-1.6.1-hadoop2.6.0" in stdout 
+            hookenv.log("Correct spark version in {}".format(hostname))
+
+            # Check the new version is functional
+            attempt = 1
+            while attempt < 5:
+                attempt = attempt + 1
+                stdout, result = sparkunit.ssh('./sparkpi.sh')
+                if "3.14" in stdout:
+                    hookenv.log("Functional spark version in {}".format(hostname))
+                    break
+                else:
+                    hookenv.log("Retrying spark submit in {}".format(hostname))
+                    time.sleep(10)
+
+            assert "3.14" in stdout 
+            
+
+
+if __name__ == '__main__':
+    unittest.main()
